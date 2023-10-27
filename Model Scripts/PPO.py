@@ -125,7 +125,7 @@ def objective(trial):
     return -win_rate  
 
 study = optuna.create_study()
-study.optimize(objective, n_trials=3)  #3 trials due to computational limits
+study.optimize(objective, n_trials=200)  #3 trials due to computational limits
 
 print(study.best_params) # <-- best hyperparameters found (not necessarily the same as best model)
 
