@@ -135,7 +135,7 @@ if __name__ == "__main__":
 
     
     env = DummyVecEnv([lambda: SimpleBlackjackEnv()])
-    best_model = DQN("MlpPolicy", env, **best_params, verbose=1)
+    best_model = DQN("MlpPolicy", env, **best_params, verbose=1,tensorboard_log="./dqn_blackjack_tensorboard/")
     best_model.learn(total_timesteps=200000)
     
     # Save the best model
