@@ -1,6 +1,17 @@
-#Environment
-
-
+import random
+import gym
+from gym import spaces
+import numpy as np
+from stable_baselines3 import PPO
+import optuna
+from stable_baselines3 import PPO
+from stable_baselines3.common.vec_env import DummyVecEnv
+from stable_baselines3 import DQN
+from gym.wrappers import monitoring
+from stable_baselines3.common.callbacks import CheckpointCallback, EvalCallback
+import matplotlib.pyplot as plt
+from stable_baselines3.common.monitor import Monitor
+import pandas as pd
 def cmp(a, b):
     if a > b:
         return 1
@@ -91,14 +102,12 @@ obs, reward, done, _ = env.step(1)
 print(env.render())
 obs, reward, done, _ = env.step(0)
 print(env.render())
-
-#model training
-
-
-
 def evaluate_agent(model, env, num_games=1000):
     wins = 0
-    for _ in range(num_games):
+    win_rates = []
+    num_games_list = []  # List to store the number of games after each logging interval
+
+    for i in range(num_games):
         obs = env.reset()
         done = False
         while not done:
@@ -106,8 +115,16 @@ def evaluate_agent(model, env, num_games=1000):
             obs, reward, done, _ = env.step(action)
             if done and reward == 1:
                 wins += 1
-    win_rate = wins / num_games
-    return win_rate
+        if (i + 1) % 100 == 0:  # Log win rate every 100 games
+            win_rates.append(wins / (i + 1))
+            num_games_list.append(i + 1)  # Append the number of games played so far
+
+    # Create a DataFrame with both win rates and number of games
+    win_rate_df = pd.DataFrame({'WinRate': win_rates, 'NumGames': num_games_list})
+    win_rate_df.to_csv('PPO500k_win_rate_over_time.csv', index=False)
+    
+    return wins / num_games
+
 
 # Create the environment
 env = DummyVecEnv([lambda: SimpleBlackjackEnv()])
@@ -128,33 +145,45 @@ params = {
 model = PPO('MlpPolicy', env, verbose=1, tensorboard_log="./blackjack_tensorboard/", **params)
 
 # Train the model
-model.learn(total_timesteps=100000)
+model.learn(total_timesteps=100)
 
 # Evaluate the model
 win_rate = evaluate_agent(model, env)
-print(f"Win rate: {win_rate:.2f}")
 
-#model evaluation
-
-import pandas as pd
 def simulate_blackjack_games(env, model, num_games=10000):
+    action_frequencies = {}
+    rewards = []
     results = []
 
     for game in range(num_games):
         obs = env.reset()
         done = False
+        total_reward = 0
         player_actions = []
         player_hand_sums = []
 
         while not done:
             action, _ = model.predict(obs)
             player_actions.append('Hit' if action == 1 else 'Stick')
+
+            # Define state key
+            player_hand = obs[:11][obs[:11] != 0]
+            dealer_visible_card = env.dealer[0]
+            state_key = (tuple(player_hand), dealer_visible_card)
+
+            # Record action frequencies
+            if state_key not in action_frequencies:
+                action_frequencies[state_key] = {'Hit': 0, 'Stick': 0}
+            action_frequencies[state_key]['Hit' if action == 1 else 'Stick'] += 1
+
             obs, reward, done, _ = env.step(action)
-            player_hand_sums.append(env.sum_hand(obs[:11][obs[:11] != 0]))
+            total_reward += reward
+            player_hand_sums.append(env.sum_hand(player_hand))
+
+        rewards.append(total_reward)
 
         player_final_hand = obs[:11][obs[:11] != 0]
         dealer_final_hand = obs[11:22][obs[11:22] != 0]
-        dealer_visible_card = env.dealer[0]
 
         game_results = {
             'Game': game + 1,
@@ -169,12 +198,29 @@ def simulate_blackjack_games(env, model, num_games=10000):
         }
         results.append(game_results)
 
+    # Export action frequencies and rewards
+    action_freq_data = []
+    for state, actions in action_frequencies.items():
+        player_hand, dealer_card = state
+        action_freq_data.append({'PlayerHand': ' '.join(map(str, player_hand)), 
+                                 'DealerVisibleCard': dealer_card,
+                                 'Hit': actions['Hit'], 
+                                 'Stick': actions['Stick']})
+    
+    action_freq_df = pd.DataFrame(action_freq_data)
+    action_freq_df.to_csv('PPO500k_action_frequencies.csv', index=False)
+    
+    rewards_df = pd.DataFrame(rewards, columns=['Reward'])
+    rewards_df.to_csv('PPO500k_rewards_distribution.csv', index=False)
+
     results_df = pd.DataFrame(results)
-    results_df.to_csv('blackjack_results.csv', index=False)
+    results_df.to_csv('PPO500k_blackjack_results.csv', index=False)
 
     win_rate = results_df[results_df['Outcome'] == 'Win'].shape[0] / num_games
     print(f"\nAgent won {results_df[results_df['Outcome'] == 'Win'].shape[0]} out of {num_games} games. Win rate: {win_rate * 100:.2f}%")
     return win_rate
-# Example usage
+
+model.save("PPO500k")
 env = SimpleBlackjackEnv()
 simulate_blackjack_games(env, model)
+print(f"Win rate: {win_rate:.2f}")
